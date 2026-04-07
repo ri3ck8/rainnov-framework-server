@@ -1,0 +1,202 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.0.5'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'com.google.protobuf' version '0.9.4'
+}
+
+group = 'com.rainnov'
+version = '0.0.1-SNAPSHOT'
+description = 'rainnov-framework-server'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
+    // Netty
+    implementation 'io.netty:netty-all:4.1.115.Final'
+
+    // Protobuf
+    implementation 'com.google.protobuf:protobuf-java:4.29.3'
+
+    // Guava（令牌桶限流 RateLimiter）
+    implementation 'com.google.guava:guava:33.3.1-jre'
+
+    // Jackson（DistributedQueueManager JSON 序列化）
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-data-redis-test'
+    testCompileOnly 'org.projectlombok:lombok'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testAnnotationProcessor 'org.projectlombok:lombok'
+}
+
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+}
+
+tasks.withType(JavaExec) {
+    jvmArgs = [
+            '-Dfile.encoding=UTF-8',
+            '-Dsun.stdout.encoding=UTF-8',
+            '-Dsun.stderr.encoding=UTF-8'
+    ]
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+tasks.named('processResources') {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+protobuf {
+    protoc {
+        artifact = 'com.google.protobuf:protoc:4.29.3'
+    }
+}
+
+// Ensure proto source directory is recognized
+sourceSets {
+    main {
+        proto {
+            srcDir 'src/main/proto'
+        }
+    }
+}
+
+// ─── generateMsgId Task ───────────────────────────────────────────────────────
+// Scans .proto files for C{msgId}_{MessageName} messages, resolves module names
+// via msg-modules.properties, and generates MsgId.java with nested static classes.
+// ───────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Converts a CamelCase name to UPPER_SNAKE_CASE.
+ * e.g. LoginReq → LOGIN_REQ, CreateRoomReq → CREATE_ROOM_REQ
+ */
+def toUpperSnakeCase(String name) {
+    // Insert underscore before each uppercase letter that follows a lowercase letter or digit,
+    // or before a single uppercase letter followed by a lowercase letter when preceded by uppercase.
+    def result = name.replaceAll('([a-z0-9])([A-Z])', '$1_$2')
+                     .replaceAll('([A-Z]+)([A-Z][a-z])', '$1_$2')
+    return result.toUpperCase()
+}
+
+/**
+ * Resolves the module name for a given msgId using the sorted range→module mapping.
+ * sortedRanges: list of range start values sorted in descending order
+ * rangeMap: map of rangeStart → moduleName
+ * Returns the module name from config, or MODULE_{base} if not in any defined range.
+ */
+def resolveModule(int msgId, List<Integer> sortedRanges, Map<Integer, String> rangeMap) {
+    for (int rangeStart : sortedRanges) {
+        if (msgId >= rangeStart) {
+            return rangeMap[rangeStart]
+        }
+    }
+    // Fallback: not in any defined range
+    int base = (msgId / 1000) * 1000
+    return "MODULE_${base}"
+}
+
+tasks.register('generateMsgId') {
+    group = 'code generation'
+    description = 'Scans .proto files and generates MsgId.java with message ID constants'
+
+    def protoDir = file('src/main/proto')
+    def propertiesFile = file('src/main/proto/msg-modules.properties')
+    def outputFile = file('src/main/java/com/rainnov/framework/proto/MsgId.java')
+
+    inputs.dir(protoDir)
+    inputs.file(propertiesFile)
+    outputs.file(outputFile)
+
+    doLast {
+        // Step 1: Read msg-modules.properties and build sorted range→module mapping
+        def rangeMap = new TreeMap<Integer, String>()
+        if (propertiesFile.exists()) {
+            def props = new Properties()
+            propertiesFile.withInputStream { props.load(it) }
+            props.each { key, value ->
+                rangeMap[Integer.parseInt(key.toString().trim())] = value.toString().trim()
+            }
+        }
+        // Sorted descending for range lookup
+        def sortedRanges = new ArrayList<Integer>(rangeMap.keySet())
+        sortedRanges.sort { a, b -> b <=> a }
+
+        // Step 2: Scan all .proto files and extract C{msgId}_{MessageName} messages
+        def pattern = ~/message\s+C(\d+)_(\w+)/
+        def entries = []
+
+        protoDir.eachFileRecurse(groovy.io.FileType.FILES) { file ->
+            if (file.name.endsWith('.proto')) {
+                file.eachLine { line ->
+                    def matcher = pattern.matcher(line)
+                    if (matcher.find()) {
+                        def msgId = Integer.parseInt(matcher.group(1))
+                        def msgName = matcher.group(2)
+                        entries << [msgId: msgId, msgName: msgName]
+                    }
+                }
+            }
+        }
+
+        // Step 3: Group entries by module using range mapping
+        def moduleMap = new TreeMap<String, List>()
+        entries.each { entry ->
+            def moduleName = resolveModule(entry.msgId, sortedRanges, rangeMap)
+            if (!moduleMap.containsKey(moduleName)) {
+                moduleMap[moduleName] = []
+            }
+            moduleMap[moduleName] << entry
+        }
+
+        // Sort entries within each module by msgId
+        moduleMap.each { moduleName, moduleEntries ->
+            moduleEntries.sort { a, b -> a.msgId <=> b.msgId }
+        }
+
+        // Step 4: Generate MsgId.java
+        outputFile.parentFile.mkdirs()
+        def sb = new StringBuilder()
+        sb.append('// Auto-generated by generateMsgId task. DO NOT EDIT.\n')
+        sb.append('package com.rainnov.framework.proto;\n')
+        sb.append('\n')
+        sb.append('public final class MsgId {\n')
+        sb.append('\n')
+        sb.append('    private MsgId() {}\n')
+
+        moduleMap.each { moduleName, moduleEntries ->
+            sb.append('\n')
+            sb.append("    public static final class ${moduleName} {\n")
+            moduleEntries.each { entry ->
+                def constName = toUpperSnakeCase(entry.msgName)
+                sb.append("        public static final int ${constName} = ${entry.msgId};\n")
+            }
+            sb.append('    }\n')
+        }
+
+        sb.append('}\n')
+        outputFile.text = sb.toString()
+
+        logger.lifecycle("generateMsgId: Generated MsgId.java with ${entries.size()} message(s) in ${moduleMap.size()} module(s)")
+    }
+}
+
+// Task dependencies: generateProto → generateMsgId → compileJava
+generateMsgId.dependsOn generateProto
+compileJava.dependsOn generateMsgId

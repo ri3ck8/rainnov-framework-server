@@ -1,0 +1,22 @@
+syntax = "proto3";
+package com.rainnov.framework.proto;
+
+option java_package = "com.rainnov.framework.proto";
+option java_outer_classname = "GameMessageProto";
+
+// 统一消息包装器
+message GameMessage {
+  int32  msg_id     = 1;  // 消息号（业务层约束为 short 范围：-32768~32767），用于路由
+  int32  seq        = 2;  // 序列号，用于请求/响应匹配
+  bytes  payload    = 3;  // 业务消息体（具体 proto 序列化后的字节）
+  int32  error_code = 4;  // 错误码，0 表示成功
+}
+
+// 心跳（系统消息）
+message C1_HeartbeatReq {
+  int64 timestamp = 1;
+}
+
+message C2_HeartbeatResp {
+  int64 timestamp = 1;
+}
