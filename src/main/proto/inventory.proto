@@ -1,0 +1,73 @@
+syntax = "proto3";
+package com.rainnov.framework.proto;
+
+option java_package = "com.rainnov.framework.proto";
+option java_outer_classname = "InventoryProto";
+
+// 公共子消息：背包格子信息
+message InventorySlot {
+  int32 slot_index = 1;
+  int32 item_id    = 2;
+  int32 count      = 3;
+  int64 expire_time = 4;  // 可选，仅当物品配置了过期策略时填充，0 表示永不过期
+}
+
+// 查询背包
+message C5001_QueryInventoryReq {}
+message C5002_QueryInventoryResp {
+  repeated InventorySlot slots = 1;
+  int32 capacity = 2;
+}
+
+// 使用物品
+message C5005_UseItemReq {
+  int32 slot_index = 1;
+  int32 count      = 2;
+}
+message C5006_UseItemResp {
+  InventorySlot updated_slot = 1;  // 更新后的格子信息，若清空则 count=0
+}
+
+// 丢弃物品
+message C5007_DiscardItemReq {
+  int32 slot_index = 1;
+  int32 count      = 2;
+}
+message C5008_DiscardItemResp {
+  InventorySlot updated_slot = 1;
+}
+
+// 整理背包
+message C5009_SortInventoryReq {}
+message C5010_SortInventoryResp {
+  repeated InventorySlot slots = 1;
+  int32 capacity = 2;
+}
+
+// 交换格子
+message C5011_SwapSlotReq {
+  int32 source_slot_index = 1;
+  int32 target_slot_index = 2;
+}
+message C5012_SwapSlotResp {
+  InventorySlot source_slot = 1;
+  InventorySlot target_slot = 2;
+}
+
+// 扩容背包
+message C5013_ExpandCapacityReq {
+  int32 amount = 1;
+}
+message C5014_ExpandCapacityResp {
+  int32 new_capacity = 1;
+}
+
+// 物品变更通知（服务端主动推送）
+message C5015_InventoryChangeNotify {
+  repeated InventorySlot affected_slots = 1;
+}
+
+// 物品过期通知（服务端主动推送）
+message C5016_ItemExpiredNotify {
+  repeated InventorySlot expired_slots = 1;
+}

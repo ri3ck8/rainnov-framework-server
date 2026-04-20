@@ -1,4 +1,4 @@
-package com.rainnov.framework.client;
+package com.rainnov.client;
 
 import com.rainnov.framework.proto.GameMessageProto.GameMessage;
 import com.rainnov.framework.proto.GameMessageProto.C1_HeartbeatReq;
@@ -6,6 +6,9 @@ import com.rainnov.framework.proto.GameMessageProto.C2_HeartbeatResp;
 import com.rainnov.framework.proto.LoginProto.C1001_LoginReq;
 import com.rainnov.framework.proto.LoginProto.C1002_LoginResp;
 import com.rainnov.framework.proto.LoginProto.C1004_LogoutResp;
+import com.rainnov.framework.proto.InventoryProto.C5001_QueryInventoryReq;
+import com.rainnov.framework.proto.InventoryProto.C5002_QueryInventoryResp;
+import com.rainnov.framework.proto.InventoryProto.InventorySlot;
 import com.rainnov.framework.proto.MsgId;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
@@ -71,7 +74,7 @@ public class GameClient {
             startHeartbeat();
 
             // 控制台交互
-            System.out.println("命令: login <token> | logout | quit");
+            System.out.println("命令: login <token> | logout | bag | quit");
             BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
             String line;
             while ((line = reader.readLine()) != null) {
@@ -83,10 +86,12 @@ public class GameClient {
                     sendLogin(token);
                 } else if ("logout".equals(line)) {
                     sendLogout();
+                } else if ("bag".equals(line)) {
+                    sendQueryInventory();
                 } else if ("quit".equals(line)) {
                     break;
                 } else {
-                    System.out.println("未知命令。可用: login <token> | logout | quit");
+                    System.out.println("未知命令。可用: login <token> | logout | bag | quit");
                 }
             }
         } finally {
@@ -125,6 +130,17 @@ public class GameClient {
                 .build();
         sendMsg(msg);
         System.out.println("[登录] 发送 token=" + token);
+    }
+
+    private static void sendQueryInventory() {
+        C5001_QueryInventoryReq req = C5001_QueryInventoryReq.newBuilder().build();
+        GameMessage msg = GameMessage.newBuilder()
+                .setMsgId(MsgId.INVENTORY.QUERY_INVENTORY_REQ)
+                .setSeq(SEQ.incrementAndGet())
+                .setPayload(req.toByteString())
+                .build();
+        sendMsg(msg);
+        System.out.println("[背包] 查询已发送");
     }
 
     private static void sendLogout() {
@@ -205,6 +221,16 @@ public class GameClient {
                 System.out.println("[登录] 成功 userId=" + resp.getUserId());
             } else if (msgId == MsgId.LOGIN.LOGOUT_RESP) {
                 System.out.println("[登出] 成功");
+            } else if (msgId == MsgId.INVENTORY.QUERY_INVENTORY_RESP) {
+                C5002_QueryInventoryResp resp = C5002_QueryInventoryResp.parseFrom(msg.getPayload());
+                System.out.println("[背包] 容量=" + resp.getCapacity() + " 已用格子=" + resp.getSlotsCount());
+                for (InventorySlot slot : resp.getSlotsList()) {
+                    String expireInfo = slot.getExpireTime() > 0
+                            ? " 过期时间=" + slot.getExpireTime()
+                            : "";
+                    System.out.println("  格子[" + slot.getSlotIndex() + "] 物品=" + slot.getItemId()
+                            + " 数量=" + slot.getCount() + expireInfo);
+                }
             } else {
                 System.out.println("[响应] msgId=" + msgId + " payload=" + msg.getPayload().size() + " bytes");
             }

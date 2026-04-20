@@ -1,4 +1,4 @@
-package com.rainnov.framework.example;
+package com.rainnov.modules.user;
 
 import com.rainnov.framework.net.session.GameSession;
 import com.rainnov.framework.net.dispatch.MsgController;
@@ -14,7 +14,7 @@ import com.rainnov.framework.proto.MsgId;
  * 演示 @MsgController + @MsgMapping 的基本用法。
  */
 @MsgController
-public class LoginController {
+public class UserController {
 
     /**
      * 登录接口：requireAuth=false，无需鉴权即可访问。

@@ -18,19 +18,22 @@
 ## 项目结构
 
 ```
-src/main/java/com/rainnov/framework/
-├── net/
-│   ├── server/         # NettyServer, GameChannelInitializer, MessageDispatcher, ServerMetrics
-│   ├── session/        # GameSession, SessionManager
-│   ├── queue/          # SharedQueueManager, DistributedQueueManager, GroupMessage, GroupType, GroupKeyResolver
-│   └── dispatch/       # MsgController, MsgMapping, MsgControllerRegistry
-├── proto/              # MsgId.java (自动生成)
-├── example/            # LoginController, GameGroupKeyResolver (示例)
-└── client/             # GameClient (测试客户端)
+src/main/java/com/rainnov/
+├── framework/                  # 框架核心
+│   ├── net/
+│   │   ├── server/             # NettyServer, GameChannelInitializer, MessageDispatcher, ServerMetrics
+│   │   ├── session/            # GameSession, SessionManager
+│   │   ├── queue/              # SharedQueueManager, DistributedQueueManager, GroupMessage, GroupType, GroupKeyResolver, GameGroupKeyResolver
+│   │   └── dispatch/           # MsgController, MsgMapping, MsgControllerRegistry
+│   └── proto/                  # MsgId.java (自动生成)
+├── modules/                    # 业务模块
+│   ├── user/                   # UserController (登录/登出)
+│   └── inventory/              # 背包模块 (InventoryController, InventoryService, 物品模型, 效果处理器)
+└── client/                     # GameClient (测试客户端)
 
 src/main/proto/
 ├── game_message.proto      # GameMessage 统一包装器 + 心跳消息
-├── login.proto             # 登录/登出业务消息
+├── user.proto              # 登录/登出业务消息
 └── msg-modules.properties  # 消息号模块范围映射配置
 ```
 
@@ -67,7 +70,7 @@ game.session.rate-limit=30.0
 ### 3. 运行测试客户端
 
 ```bash
-./gradlew run -PmainClass=com.rainnov.framework.client.GameClient
+./gradlew run -PmainClass=com.rainnov.client.GameClient
 ```
 
 客户端连接后自动每 30s 发送心跳，支持控制台命令：

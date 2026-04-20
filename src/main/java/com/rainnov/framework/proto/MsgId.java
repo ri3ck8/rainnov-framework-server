@@ -5,6 +5,23 @@ public final class MsgId {
 
     private MsgId() {}
 
+    public static final class INVENTORY {
+        public static final int QUERY_INVENTORY_REQ = 5001;
+        public static final int QUERY_INVENTORY_RESP = 5002;
+        public static final int USE_ITEM_REQ = 5005;
+        public static final int USE_ITEM_RESP = 5006;
+        public static final int DISCARD_ITEM_REQ = 5007;
+        public static final int DISCARD_ITEM_RESP = 5008;
+        public static final int SORT_INVENTORY_REQ = 5009;
+        public static final int SORT_INVENTORY_RESP = 5010;
+        public static final int SWAP_SLOT_REQ = 5011;
+        public static final int SWAP_SLOT_RESP = 5012;
+        public static final int EXPAND_CAPACITY_REQ = 5013;
+        public static final int EXPAND_CAPACITY_RESP = 5014;
+        public static final int INVENTORY_CHANGE_NOTIFY = 5015;
+        public static final int ITEM_EXPIRED_NOTIFY = 5016;
+    }
+
     public static final class LOGIN {
         public static final int LOGIN_REQ = 1001;
         public static final int LOGIN_RESP = 1002;

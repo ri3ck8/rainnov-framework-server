@@ -1,8 +1,6 @@
-package com.rainnov.framework.example;
+package com.rainnov.framework.net.queue;
 
 import com.rainnov.framework.net.session.GameSession;
-import com.rainnov.framework.net.queue.GroupKeyResolver;
-import com.rainnov.framework.net.queue.GroupType;
 import org.springframework.stereotype.Component;
 
 /**

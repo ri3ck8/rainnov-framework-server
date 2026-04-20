@@ -79,9 +79,9 @@
   - [x] 12.3 在 SessionManager、GameSession、MessageDispatcher 中的关键路径调用 ServerMetrics 更新计数器
 
 - [x] 13 示例业务 Controller 与 Proto 文件
-  - [x] 13.1 创建 src/main/proto/login.proto（C1001_LoginReq、C1002_LoginResp、C1003_LogoutReq）
-  - [x] 13.2 创建 LoginController 示例（@MsgController，login 方法 requireAuth=false，logout 方法默认 requireAuth=true）
-  - [x] 13.3 创建 GameGroupKeyResolver 示例实现（从 GameSession 解析 teamId/guildId）
+  - [x] 13.1 创建 src/main/proto/user.proto（C1001_LoginReq、C1002_LoginResp、C1003_LogoutReq）
+  - [x] 13.2 创建 UserController（@MsgController，login 方法 requireAuth=false，logout 方法默认 requireAuth=true），路径: com.rainnov.modules.user
+  - [x] 13.3 创建 GameGroupKeyResolver 示例实现（从 GameSession 解析 teamId/guildId），路径: com.rainnov.framework.net.queue
 
 - [x] 14 单元测试
   - [x] 14.1 MsgControllerRegistry 单元测试（注解扫描、签名校验、重复 msgId、命名一致性校验）

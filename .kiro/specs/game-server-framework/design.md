@@ -21,7 +21,7 @@ graph TD
     Pipeline["ChannelPipeline\n(编解码 + 心跳)"]
     Dispatcher["MessageDispatcher\n(消息分发器)"]
     MsgControllerRegistry["MsgControllerRegistry\n(消息号 → MethodInvoker 映射)"]
-    Controller1["LoginController\n(1001 login, 1003 logout)"]
+    Controller1["UserController\n(1001 login, 1003 logout)"]
     Controller2["RoomController\n(2001~2099)"]
     ControllerN["GameController\n(3001~3099)"]
     SessionMgr["SessionManager\n(会话管理)"]
@@ -120,7 +120,7 @@ message HeartbeatResp { int64 timestamp = 1; }
 业务消息示例（遵循 `C{msgId}_{Name}` 命名规范）：
 
 ```protobuf
-// proto/login.proto
+// proto/user.proto
 syntax = "proto3";
 package com.rainnov.framework.proto;
 
@@ -908,7 +908,7 @@ END PROCEDURE
 ```java
 // 登录模块 Controller 示例：一个类处理多个消息号
 @MsgController
-public class LoginController {
+public class UserController {
 
     @Autowired
     private UserService userService;
