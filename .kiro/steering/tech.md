@@ -16,15 +16,16 @@
 | Guava 33.3.1 | `RateLimiter` 令牌桶限流 |
 | Jackson | `DistributedQueueManager` 的 JSON 序列化 |
 | Lombok | 减少样板代码（`@Slf4j`、`@Getter`、`@Setter`） |
-| JUnit 5 | 通过 `spring-boot-starter-test` 进行测试 |
+| JUnit 5 + Mockito | 单元测试（通过 `spring-boot-starter-test`） |
+| jqwik 1.9.2 | 属性测试（Property-Based Testing） |
 
 ## Protobuf 与代码生成
 
 - Proto 源文件目录：`src/main/proto/`
-- 模块映射配置：`src/main/proto/msg-modules.properties`
-- 自定义 Gradle 任务 `generateMsgId` 扫描 `.proto` 文件中的 `C{msgId}_{Name}` 消息模式，生成 `MsgId.java`
+- 模块映射配置：`src/main/proto/msg-modules.properties`（格式：`{起始msgId}={MODULE_NAME}`）
+- 自定义 Gradle 任务 `generateMsgId` 扫描 `.proto` 中 `C{msgId}_{Name}` 消息，生成 `MsgId.java`
 - 构建链：`generateProto` → `generateMsgId` → `compileJava`
-- `MsgId.java` 为自动生成文件 — 禁止手动编辑
+- `MsgId.java` 为自动生成文件 — **禁止手动编辑**
 
 ## 常用命令
 
