@@ -38,10 +38,10 @@ class SessionManagerTest {
     void setUp() {
         serverMetrics = new ServerMetrics();
         sessionManager = new SessionManager(registry, serverMetrics, 30.0);
-        // Stub remoteAddress for logging in createSession
+        // createSession 内部打日志需要 remoteAddress
         lenient().when(channel1.remoteAddress()).thenReturn(new InetSocketAddress("127.0.0.1", 8080));
         lenient().when(channel2.remoteAddress()).thenReturn(new InetSocketAddress("127.0.0.1", 8081));
-        // Stub writeAndFlush and close for GameSession internals
+        // GameSession 内部会调用 writeAndFlush / close
         lenient().when(channel1.writeAndFlush(any())).thenReturn(channelFuture);
         lenient().when(channel2.writeAndFlush(any())).thenReturn(channelFuture);
         lenient().when(channel1.close()).thenReturn(channelFuture);
@@ -106,7 +106,6 @@ class SessionManagerTest {
 
     @Test
     void removeSession_unknownChannel_shouldDoNothing() {
-        // Should not throw
         sessionManager.removeSession(channel1);
         assertEquals(0, sessionManager.onlineCount());
     }
@@ -124,7 +123,7 @@ class SessionManagerTest {
     @Test
     void registerUserSession_withZeroUserId_shouldNotRegister() {
         GameSession session = sessionManager.createSession(channel1);
-        // userId defaults to 0, not bound
+        // 未调用 bindUser，userId 默认为 0
 
         sessionManager.registerUserSession(session);
 

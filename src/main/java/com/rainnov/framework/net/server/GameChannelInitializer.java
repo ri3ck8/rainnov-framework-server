@@ -49,7 +49,6 @@ public class GameChannelInitializer extends ChannelInitializer<SocketChannel> {
     protected void initChannel(SocketChannel ch) {
         ChannelPipeline p = ch.pipeline();
 
-        // ─── 10.2: 最前端 — 最大连接数检查（超限直接关闭，不发送任何响应）────────
         p.addLast(new ChannelInboundHandlerAdapter() {
             @Override
             public void channelActive(ChannelHandlerContext ctx) throws Exception {
@@ -61,8 +60,6 @@ public class GameChannelInitializer extends ChannelInitializer<SocketChannel> {
                 ctx.fireChannelActive();
             }
         });
-
-        // ─── 10.1: 完整 ChannelPipeline 配置 ────────────────────────────────────
 
         // WebSocket 握手所需的 HTTP 编解码
         p.addLast(new HttpServerCodec());

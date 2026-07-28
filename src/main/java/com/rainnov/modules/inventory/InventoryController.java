@@ -21,8 +21,6 @@ public class InventoryController {
         this.inventoryService = inventoryService;
     }
 
-    // ─── Helper ─────────────────────────────────────────────────────────────────
-
     private InventoryProto.InventorySlot toProtoSlot(SlotSnapshot snap) {
         return InventoryProto.InventorySlot.newBuilder()
                 .setSlotIndex(snap.slotIndex())
@@ -31,8 +29,6 @@ public class InventoryController {
                 .setExpireTime(snap.expireTime())
                 .build();
     }
-
-    // ─── 9.2: 查询背包 ─────────────────────────────────────────────────────────
 
     @MsgMapping(MsgId.INVENTORY.QUERY_INVENTORY_REQ)
     public C5002_QueryInventoryResp queryInventory(GameSession session, C5001_QueryInventoryReq req) {
@@ -46,8 +42,6 @@ public class InventoryController {
         return builder.build();
     }
 
-    // ─── 9.3: 使用物品 ─────────────────────────────────────────────────────────
-
     @MsgMapping(MsgId.INVENTORY.USE_ITEM_REQ)
     public C5006_UseItemResp useItem(GameSession session, C5005_UseItemReq req) {
         InventoryService.UseResult result = inventoryService.useItem(session, req.getSlotIndex(), req.getCount());
@@ -58,8 +52,6 @@ public class InventoryController {
         }
         return builder.build();
     }
-
-    // ─── 9.4: 丢弃物品 ─────────────────────────────────────────────────────────
 
     @MsgMapping(MsgId.INVENTORY.DISCARD_ITEM_REQ)
     public C5008_DiscardItemResp discardItem(GameSession session, C5007_DiscardItemReq req) {
@@ -72,8 +64,6 @@ public class InventoryController {
         return builder.build();
     }
 
-    // ─── 9.5: 整理背包 ─────────────────────────────────────────────────────────
-
     @MsgMapping(MsgId.INVENTORY.SORT_INVENTORY_REQ)
     public C5010_SortInventoryResp sortInventory(GameSession session, C5009_SortInventoryReq req) {
         InventoryService.SortResult result = inventoryService.sortInventory(session);
@@ -85,8 +75,6 @@ public class InventoryController {
         }
         return builder.build();
     }
-
-    // ─── 9.6: 交换格子 ─────────────────────────────────────────────────────────
 
     @MsgMapping(MsgId.INVENTORY.SWAP_SLOT_REQ)
     public C5012_SwapSlotResp swapSlot(GameSession session, C5011_SwapSlotReq req) {
@@ -101,8 +89,6 @@ public class InventoryController {
         }
         return builder.build();
     }
-
-    // ─── 9.7: 扩容背包 ─────────────────────────────────────────────────────────
 
     @MsgMapping(MsgId.INVENTORY.EXPAND_CAPACITY_REQ)
     public C5014_ExpandCapacityResp expandCapacity(GameSession session, C5013_ExpandCapacityReq req) {

@@ -27,7 +27,6 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class GameSession {
 
-    // ─── 4.1: 基础字段 ───────────────────────────────────────────────────────────
     @Getter
     private final String sessionId;
     @Getter
@@ -41,28 +40,17 @@ public class GameSession {
     @Getter @Setter
     private long lastActiveTime;
 
-    // GroupKeyResolver 需要的字段
-    @Getter @Setter
-    private Long teamId;
-    @Getter @Setter
-    private Long guildId;
-
-    // ─── 4.2: 消息队列与 POISON_PILL ─────────────────────────────────────────────
     private static final GameMessage POISON_PILL = GameMessage.getDefaultInstance();
     private final LinkedBlockingQueue<GameMessage> messageQueue = new LinkedBlockingQueue<>(256);
 
-    // ─── 4.3: 令牌桶限流 ─────────────────────────────────────────────────────────
     private final RateLimiter rateLimiter;
 
-    // ─── 4.4: 停机标志 ──────────────────────────────────────────────────────────
     private volatile boolean acceptingMessages = true;
 
-    // ─── 4.5 & 4.7: 消费线程 ────────────────────────────────────────────────────
     private final Thread consumerThread;
     private final MsgControllerRegistry registry;
     private final ServerMetrics serverMetrics;
 
-    // ─── 4.7: 构造函数（启动虚拟线程）─────────────────────────────────────────────
     public GameSession(Channel channel, MsgControllerRegistry registry, double rateLimitPerSecond, ServerMetrics serverMetrics) {
         this.sessionId = UUID.randomUUID().toString();
         this.channel = channel;
@@ -78,7 +66,6 @@ public class GameSession {
                 .start(buildConsumerTask());
     }
 
-    // ─── 4.3: 限流检查 ──────────────────────────────────────────────────────────
     /**
      * 非阻塞限流检查，立即返回是否获取到令牌。
      */
@@ -86,7 +73,6 @@ public class GameSession {
         return rateLimiter.tryAcquire();
     }
 
-    // ─── 4.4: 入队方法 ──────────────────────────────────────────────────────────
     /**
      * 将消息投入用户专属队列（由 Netty Worker 线程调用，非阻塞）。
      * 停机期间静默丢弃；队列满时丢弃并记录 WARN。
@@ -101,7 +87,6 @@ public class GameSession {
         }
     }
 
-    // ─── 4.5: 消费任务 ──────────────────────────────────────────────────────────
     /**
      * 构建虚拟线程消费逻辑：
      * 从队列取消息 → 查找 MethodInvoker → 反序列化 payload → 反射调用 → 自动响应包装。
@@ -176,8 +161,6 @@ public class GameSession {
         };
     }
 
-    // ─── 4.6: 工具方法 ──────────────────────────────────────────────────────────
-
     /**
      * 发送消息给客户端。
      */
@@ -224,8 +207,6 @@ public class GameSession {
             Thread.currentThread().interrupt();
         }
     }
-
-    // ─── 辅助方法 ────────────────────────────────────────────────────────────────
 
     /**
      * 构建错误响应 GameMessage。

@@ -34,13 +34,9 @@ public class InventoryService {
         this.effectHandlerRegistry = effectHandlerRegistry;
     }
 
-    // ─── 6.1: getOrCreateInventory ──────────────────────────────────────────────
-
     public PlayerInventory getOrCreateInventory(long userId) {
         return inventories.computeIfAbsent(userId, id -> new PlayerInventory(id, DEFAULT_CAPACITY));
     }
-
-    // ─── 6.2: cleanExpiredItems ─────────────────────────────────────────────────
 
     public List<SlotSnapshot> cleanExpiredItems(GameSession session, PlayerInventory inventory) {
         List<SlotSnapshot> expiredSnapshots = new ArrayList<>();
@@ -63,7 +59,7 @@ public class InventoryService {
             }
 
             if (policy.mode() == ExpirationMode.DURATION && policy.durationDays() <= 0) {
-                continue; // treated as never expires per requirement 11.7
+                continue; // durationDays <= 0 视为永不过期
             }
 
             boolean expired = false;
@@ -98,8 +94,6 @@ public class InventoryService {
         return expiredSnapshots;
     }
 
-    // ─── 6.4: queryInventory ────────────────────────────────────────────────────
-
     public QueryResult queryInventory(GameSession session) {
         long userId = session.getUserId();
         PlayerInventory inventory = getOrCreateInventory(userId);
@@ -129,7 +123,7 @@ public class InventoryService {
         }
         if (policy.mode() == ExpirationMode.DURATION) {
             if (policy.durationDays() <= 0) {
-                return 0; // never expires
+                return 0; // 永不过期
             }
             return slot.getAcquiredTime() + policy.durationDays() * 86400000L;
         } else if (policy.mode() == ExpirationMode.FIXED_DATE) {
@@ -137,8 +131,6 @@ public class InventoryService {
         }
         return 0;
     }
-
-    // ─── 6.6: addItem ───────────────────────────────────────────────────────────
 
     public AddResult addItem(long userId, int itemId, int count) {
         ItemConfig config = itemConfigRegistry.getConfig(itemId);
@@ -149,7 +141,7 @@ public class InventoryService {
             return new AddResult(InventoryErrorCode.INVALID_PARAM, List.of());
         }
 
-        // Check FIXED_DATE already expired
+        // 固定到期日已过的物品不允许添加
         ExpirationPolicy policy = config.expirationPolicy();
         if (policy != null && policy.mode() == ExpirationMode.FIXED_DATE
                 && policy.fixedExpireTime() <= System.currentTimeMillis()) {
@@ -159,7 +151,7 @@ public class InventoryService {
         PlayerInventory inventory = getOrCreateInventory(userId);
         int maxStack = config.maxStack();
 
-        // Calculate available space
+        // 可用容量 = 可堆叠槽位剩余空间 + 空槽位数 × 最大堆叠数
         List<Integer> stackableSlots = inventory.findStackableSlots(itemId, maxStack);
         int availableInStacks = 0;
         for (int idx : stackableSlots) {
@@ -172,12 +164,11 @@ public class InventoryService {
             return new AddResult(InventoryErrorCode.INVENTORY_FULL, List.of());
         }
 
-        // Execute: fill stackable slots first, then empty slots
+        // 先填满已有可堆叠槽位，再占用空槽位
         int remaining = count;
         List<SlotSnapshot> affectedSlots = new ArrayList<>();
         boolean hasExpirationPolicy = policy != null;
 
-        // Fill existing stackable slots
         for (int idx : stackableSlots) {
             if (remaining <= 0) break;
             Slot slot = inventory.getSlot(idx);
@@ -188,10 +179,9 @@ public class InventoryService {
             affectedSlots.add(new SlotSnapshot(idx, slot.getItemId(), slot.getCount(), calculateExpireTime(slot)));
         }
 
-        // Fill empty slots
         while (remaining > 0) {
             int emptyIdx = inventory.findFirstEmptySlot();
-            if (emptyIdx == -1) break; // should not happen since we checked space
+            if (emptyIdx == -1) break; // 容量已提前校验，理论上不会发生
             Slot slot = inventory.getSlot(emptyIdx);
             int toAdd = Math.min(maxStack, remaining);
             slot.setItemId(itemId);
@@ -206,49 +196,42 @@ public class InventoryService {
         return new AddResult(InventoryErrorCode.SUCCESS, affectedSlots);
     }
 
-    // ─── 6.8: useItem ───────────────────────────────────────────────────────────
-
     public UseResult useItem(GameSession session, int slotIndex, int count) {
         long userId = session.getUserId();
         PlayerInventory inventory = getOrCreateInventory(userId);
         cleanExpiredItems(session, inventory);
 
-        // Validate slotIndex
         if (slotIndex < 0 || slotIndex >= inventory.getCapacity()) {
             return new UseResult(InventoryErrorCode.SLOT_INDEX_OUT_OF_RANGE, null);
         }
 
         Slot slot = inventory.getSlot(slotIndex);
 
-        // Validate slot not empty
         if (slot.isEmpty()) {
             return new UseResult(InventoryErrorCode.SLOT_EMPTY, null);
         }
 
-        // Check if item is expired (single slot check after cleanExpiredItems)
+        // cleanExpiredItems 之后的单槽位过期兜底检查
         ItemConfig config = itemConfigRegistry.getConfig(slot.getItemId());
         if (config != null && isSlotExpired(slot, config)) {
             slot.clear();
             return new UseResult(InventoryErrorCode.ITEM_EXPIRED, new SlotSnapshot(slotIndex, 0, 0, 0));
         }
 
-        // Validate usable
         if (config == null || !config.usable()) {
             return new UseResult(InventoryErrorCode.ITEM_NOT_USABLE, null);
         }
 
-        // Validate count
         if (count > slot.getCount()) {
             return new UseResult(InventoryErrorCode.INSUFFICIENT_COUNT, null);
         }
 
-        // Get effect handler - don't deduct if no handler
+        // 找不到效果处理器时不扣减数量
         ItemEffectHandler handler = effectHandlerRegistry.getHandler(config.itemType());
         if (handler == null) {
             return new UseResult(InventoryErrorCode.EFFECT_HANDLER_NOT_FOUND, null);
         }
 
-        // Deduct count
         int itemId = slot.getItemId();
         slot.reduceCount(count);
 
@@ -259,7 +242,6 @@ public class InventoryService {
                 slot.isEmpty() ? 0 : calculateExpireTime(slot)
         );
 
-        // Execute handler
         try {
             handler.handle(new ItemEffectContext(session, itemId, config, count));
         } catch (Exception e) {
@@ -269,43 +251,35 @@ public class InventoryService {
         return new UseResult(InventoryErrorCode.SUCCESS, updatedSlot);
     }
 
-    // ─── 6.10: discardItem ──────────────────────────────────────────────────────
-
     public DiscardResult discardItem(GameSession session, int slotIndex, int count) {
         long userId = session.getUserId();
         PlayerInventory inventory = getOrCreateInventory(userId);
         cleanExpiredItems(session, inventory);
 
-        // Validate slotIndex
         if (slotIndex < 0 || slotIndex >= inventory.getCapacity()) {
             return new DiscardResult(InventoryErrorCode.SLOT_INDEX_OUT_OF_RANGE, null);
         }
 
         Slot slot = inventory.getSlot(slotIndex);
 
-        // Validate slot not empty
         if (slot.isEmpty()) {
             return new DiscardResult(InventoryErrorCode.SLOT_EMPTY, null);
         }
 
-        // Check if item is expired
         ItemConfig config = itemConfigRegistry.getConfig(slot.getItemId());
         if (config != null && isSlotExpired(slot, config)) {
             slot.clear();
             return new DiscardResult(InventoryErrorCode.ITEM_EXPIRED, new SlotSnapshot(slotIndex, 0, 0, 0));
         }
 
-        // Validate discardable
         if (config == null || !config.discardable()) {
             return new DiscardResult(InventoryErrorCode.ITEM_NOT_DISCARDABLE, null);
         }
 
-        // Validate count
         if (count > slot.getCount()) {
             return new DiscardResult(InventoryErrorCode.INSUFFICIENT_COUNT, null);
         }
 
-        // Deduct count
         slot.reduceCount(count);
 
         SlotSnapshot updatedSlot = new SlotSnapshot(
@@ -318,15 +292,13 @@ public class InventoryService {
         return new DiscardResult(InventoryErrorCode.SUCCESS, updatedSlot);
     }
 
-    // ─── Helper: isSlotExpired ───────────────────────────────────────────────────
-
     private boolean isSlotExpired(Slot slot, ItemConfig config) {
         ExpirationPolicy policy = config.expirationPolicy();
         if (policy == null) {
             return false;
         }
         if (policy.mode() == ExpirationMode.DURATION && policy.durationDays() <= 0) {
-            return false; // never expires
+            return false; // 永不过期
         }
         long now = System.currentTimeMillis();
         if (policy.mode() == ExpirationMode.DURATION) {
@@ -337,14 +309,12 @@ public class InventoryService {
         return false;
     }
 
-    // ─── Stub methods for Task 8 ────────────────────────────────────────────────
-
     public SortResult sortInventory(GameSession session) {
         long userId = session.getUserId();
         PlayerInventory inventory = getOrCreateInventory(userId);
         cleanExpiredItems(session, inventory);
 
-        // Collect all non-empty items: itemId → totalCount, and preserve earliest acquiredTime
+        // 汇总非空槽位：itemId → 总数量，并记录最早的 acquiredTime
         Map<Integer, Integer> itemCounts = new LinkedHashMap<>();
         Map<Integer, Long> itemAcquiredTimes = new LinkedHashMap<>();
 
@@ -356,7 +326,7 @@ public class InventoryService {
             int itemId = slot.getItemId();
             itemCounts.merge(itemId, slot.getCount(), Integer::sum);
 
-            // Preserve earliest acquiredTime for items with expiration policy
+            // 带过期策略的物品保留最早获得时间，避免合并后延长有效期
             ItemConfig config = itemConfigRegistry.getConfig(itemId);
             if (config != null && config.expirationPolicy() != null) {
                 long existing = itemAcquiredTimes.getOrDefault(itemId, Long.MAX_VALUE);
@@ -366,17 +336,15 @@ public class InventoryService {
             }
         }
 
-        // If all slots empty, return empty result
         if (itemCounts.isEmpty()) {
             return new SortResult(InventoryErrorCode.SUCCESS, List.of(), inventory.getCapacity());
         }
 
-        // Clear all slots
         for (int i = 0; i < inventory.getCapacity(); i++) {
             inventory.clearSlot(i);
         }
 
-        // Re-fill slots compactly from index 0
+        // 从 0 号槽位起按最大堆叠数紧凑重排
         int slotIndex = 0;
         for (Map.Entry<Integer, Integer> entry : itemCounts.entrySet()) {
             int itemId = entry.getKey();
@@ -399,7 +367,6 @@ public class InventoryService {
             }
         }
 
-        // Build SlotSnapshot list of all non-empty slots
         List<SlotSnapshot> slots = new ArrayList<>();
         for (int i = 0; i < inventory.getCapacity(); i++) {
             Slot slot = inventory.getSlot(i);
@@ -416,13 +383,12 @@ public class InventoryService {
         long userId = session.getUserId();
         PlayerInventory inventory = getOrCreateInventory(userId);
 
-        // Validate both indices in range [0, capacity)
         if (sourceIndex < 0 || sourceIndex >= inventory.getCapacity()
                 || targetIndex < 0 || targetIndex >= inventory.getCapacity()) {
             return new SwapResult(InventoryErrorCode.SLOT_INDEX_OUT_OF_RANGE, null, null);
         }
 
-        // Swap the two Slot objects (swap all fields: itemId, count, acquiredTime)
+        // 交换槽位的全部字段：itemId / count / acquiredTime
         Slot source = inventory.getSlot(sourceIndex);
         Slot target = inventory.getSlot(targetIndex);
 
@@ -438,7 +404,6 @@ public class InventoryService {
         target.setCount(tempCount);
         target.setAcquiredTime(tempAcquiredTime);
 
-        // Build SlotSnapshots for both slots
         SlotSnapshot sourceSnapshot = new SlotSnapshot(
                 sourceIndex,
                 source.isEmpty() ? 0 : source.getItemId(),
@@ -459,17 +424,14 @@ public class InventoryService {
         long userId = session.getUserId();
         PlayerInventory inventory = getOrCreateInventory(userId);
 
-        // Validate amount > 0
         if (amount <= 0) {
             return new ExpandResult(InventoryErrorCode.INVALID_PARAM, inventory.getCapacity());
         }
 
-        // Validate capacity + amount <= MAX_CAPACITY
         if (inventory.getCapacity() + amount > MAX_CAPACITY) {
             return new ExpandResult(InventoryErrorCode.CAPACITY_LIMIT_REACHED, inventory.getCapacity());
         }
 
-        // Expand
         inventory.expand(amount);
 
         return new ExpandResult(InventoryErrorCode.SUCCESS, inventory.getCapacity());
@@ -495,8 +457,6 @@ public class InventoryService {
                     .build());
         }
     }
-
-    // ─── Result records ─────────────────────────────────────────────────────────
 
     public record QueryResult(int errorCode, List<SlotSnapshot> slots, int capacity) {}
 

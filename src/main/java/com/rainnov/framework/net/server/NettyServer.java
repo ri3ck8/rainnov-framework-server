@@ -2,7 +2,6 @@ package com.rainnov.framework.net.server;
 
 import com.rainnov.framework.net.session.GameSession;
 import com.rainnov.framework.net.session.SessionManager;
-import com.rainnov.framework.net.queue.SharedQueueManager;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
@@ -25,8 +24,6 @@ import java.util.concurrent.TimeUnit;
 @Component
 public class NettyServer implements InitializingBean, DisposableBean {
 
-    // ─── 11.1: 字段 ─────────────────────────────────────────────────────────────
-
     private volatile boolean shuttingDown = false;
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
@@ -34,7 +31,6 @@ public class NettyServer implements InitializingBean, DisposableBean {
 
     private final GameChannelInitializer gameChannelInitializer;
     private final SessionManager sessionManager;
-    private final SharedQueueManager sharedQueueManager;
     private final MessageDispatcher messageDispatcher;
 
     @Value("${game.server.port:8888}")
@@ -42,25 +38,19 @@ public class NettyServer implements InitializingBean, DisposableBean {
 
     public NettyServer(GameChannelInitializer gameChannelInitializer,
                        SessionManager sessionManager,
-                       SharedQueueManager sharedQueueManager,
                        MessageDispatcher messageDispatcher) {
         this.gameChannelInitializer = gameChannelInitializer;
         this.sessionManager = sessionManager;
-        this.sharedQueueManager = sharedQueueManager;
         this.messageDispatcher = messageDispatcher;
     }
-
-    // ─── 11.1 & 11.4: afterPropertiesSet ────────────────────────────────────────
 
     @Override
     public void afterPropertiesSet() throws Exception {
         start(port);
 
-        // 11.4: 注册 JVM ShutdownHook 触发优雅停机
+        // 注册 JVM ShutdownHook 触发优雅停机
         Runtime.getRuntime().addShutdownHook(new Thread(this::initiateGracefulShutdown));
     }
-
-    // ─── 11.2: start ────────────────────────────────────────────────────────────
 
     /**
      * 绑定端口并启动 WebSocket 服务。
@@ -79,17 +69,14 @@ public class NettyServer implements InitializingBean, DisposableBean {
         log.info("NettyServer started on port {}", port);
     }
 
-    // ─── 11.3: initiateGracefulShutdown ─────────────────────────────────────────
-
     /**
      * 优雅停机流程：
      * 1. 设置停机标志
      * 2. 通知 MessageDispatcher 停止入队
      * 3. 通知所有 Session 停止接受新消息
      * 4. 等待所有用户队列消费完毕（最多 30s）
-     * 5. 等待所有共享队列消费完毕（最多 30s）
-     * 6. 关闭 serverChannel
-     * 7. 关闭 Boss/Worker EventLoopGroup
+     * 5. 关闭 serverChannel
+     * 6. 关闭 Boss/Worker EventLoopGroup
      */
     public void initiateGracefulShutdown() {
         if (shuttingDown) {
@@ -111,9 +98,6 @@ public class NettyServer implements InitializingBean, DisposableBean {
             session.awaitConsumerTermination(30, TimeUnit.SECONDS);
         }
 
-        // 等待所有共享队列消费完毕
-        sharedQueueManager.awaitAllQueues(30, TimeUnit.SECONDS);
-
         // 关闭 serverChannel
         if (serverChannel != null && serverChannel.isOpen()) {
             try {
@@ -133,8 +117,6 @@ public class NettyServer implements InitializingBean, DisposableBean {
 
         log.info("优雅停机完成");
     }
-
-    // ─── DisposableBean: destroy ────────────────────────────────────────────────
 
     @Override
     public void destroy() {

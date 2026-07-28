@@ -2,7 +2,6 @@ package com.rainnov.framework.net.server;
 
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.rainnov.framework.net.dispatch.MsgControllerRegistry;
-import com.rainnov.framework.net.queue.*;
 import com.rainnov.framework.net.session.GameSession;
 import com.rainnov.framework.net.session.SessionManager;
 import com.rainnov.framework.proto.GameMessageProto.GameMessage;
@@ -15,7 +14,6 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.timeout.IdleState;
 import io.netty.handler.timeout.IdleStateEvent;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -29,28 +27,17 @@ public class MessageDispatcher extends SimpleChannelInboundHandler<GameMessage> 
 
     private final SessionManager sessionManager;
     private final MsgControllerRegistry msgControllerRegistry;
-    private final SharedQueueManager sharedQueueManager;
     private final ServerMetrics serverMetrics;
-
-    @Autowired(required = false)
-    private DistributedQueueManager distributedQueueManager;
-
-    @Autowired(required = false)
-    private GroupKeyResolver groupKeyResolver;
 
     private volatile boolean shuttingDown = false;
 
     public MessageDispatcher(SessionManager sessionManager,
                              MsgControllerRegistry msgControllerRegistry,
-                             SharedQueueManager sharedQueueManager,
                              ServerMetrics serverMetrics) {
         this.sessionManager = sessionManager;
         this.msgControllerRegistry = msgControllerRegistry;
-        this.sharedQueueManager = sharedQueueManager;
         this.serverMetrics = serverMetrics;
     }
-
-    // ─── 9.1: channelActive ─────────────────────────────────────────────────────
 
     @Override
     public void channelActive(ChannelHandlerContext ctx) throws Exception {
@@ -58,15 +45,11 @@ public class MessageDispatcher extends SimpleChannelInboundHandler<GameMessage> 
         ctx.fireChannelActive();
     }
 
-    // ─── 9.2: channelInactive ───────────────────────────────────────────────────
-
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
         sessionManager.removeSession(ctx.channel());
         ctx.fireChannelInactive();
     }
-
-    // ─── 9.3 & 9.4 & 9.5: channelRead0 核心路由逻辑 ────────────────────────────
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, GameMessage msg) {
@@ -75,7 +58,7 @@ public class MessageDispatcher extends SimpleChannelInboundHandler<GameMessage> 
 
         session.setLastActiveTime(System.currentTimeMillis());
 
-        // 9.5: 停机状态检查
+        // 停机状态检查
         if (shuttingDown) return;
 
         // 限流检查
@@ -120,41 +103,10 @@ public class MessageDispatcher extends SimpleChannelInboundHandler<GameMessage> 
             return;
         }
 
-        // 根据 groupType 决定入队目标
-        if (invoker != null && invoker.groupType() != GroupType.USER) {
-            GroupType groupType = invoker.groupType();
-
-            if (groupType == GroupType.TEAM_DISTRIBUTED || groupType == GroupType.GUILD_DISTRIBUTED) {
-                if (distributedQueueManager != null && groupKeyResolver != null) {
-                    String groupKey = groupKeyResolver.resolve(session, groupType);
-                    if (groupKey != null) {
-                        distributedQueueManager.enqueue(groupKey, new GroupMessage(session, msg));
-                        return;
-                    }
-                    // 9.4: groupKey 为 null 降级到用户队列
-                    log.debug("groupKey 解析为 null，降级到用户队列: sessionId={}, msgId={}",
-                            session.getSessionId(), msgId);
-                }
-            } else {
-                // TEAM / GUILD — 单进程共享队列
-                if (groupKeyResolver != null) {
-                    String groupKey = groupKeyResolver.resolve(session, groupType);
-                    if (groupKey != null) {
-                        sharedQueueManager.getOrCreate(groupKey).enqueue(new GroupMessage(session, msg));
-                        return;
-                    }
-                    // 9.4: groupKey 为 null 降级到用户队列
-                    log.debug("groupKey 解析为 null，降级到用户队列: sessionId={}, msgId={}",
-                            session.getSessionId(), msgId);
-                }
-            }
-        }
-
-        // 默认：投入用户专属队列
+        // 投入用户专属队列，按用户维度串行消费；
+        // 跨用户共享状态由业务侧用锁或分布式锁显式控制
         session.enqueue(msg);
     }
-
-    // ─── 9.6: userEventTriggered 心跳超时处理 ───────────────────────────────────
 
     @Override
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
@@ -168,16 +120,12 @@ public class MessageDispatcher extends SimpleChannelInboundHandler<GameMessage> 
         super.userEventTriggered(ctx, evt);
     }
 
-    // ─── 9.5: 停机标志设置 ──────────────────────────────────────────────────────
-
     /**
      * 设置停机标志（优雅停机时由 NettyServer 调用）。
      */
     public void setShuttingDown(boolean shuttingDown) {
         this.shuttingDown = shuttingDown;
     }
-
-    // ─── 辅助方法 ────────────────────────────────────────────────────────────────
 
     /**
      * 构建错误响应 GameMessage。

@@ -48,16 +48,12 @@ public class ServerMetrics {
         messagesDropped.incrementAndGet();
     }
 
-    // ─── 12.2: 定期打印指标日志 ─────────────────────────────────────────────────
-
     @Scheduled(fixedDelay = 60_000)
     public void logMetrics() {
         log.info("[ServerMetrics] online={}, total={}, received={}, dropped={}",
                 onlineConnections.get(), totalConnections.get(),
                 messagesReceived.get(), messagesDropped.get());
     }
-
-    // ─── Getters ────────────────────────────────────────────────────────────────
 
     public long getOnlineConnections() {
         return onlineConnections.get();

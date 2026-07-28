@@ -48,25 +48,20 @@ class GameSessionTest {
         }
     }
 
-    // ─── 14.4: enqueue when acceptingMessages=true → message in queue ───────────
-
     @Test
     @DisplayName("enqueue when acceptingMessages=true → message enters queue and is consumed")
     void enqueue_acceptingMessages_messageConsumed() throws Exception {
-        // Registry returns null invoker → consumer sends error response (404)
+        // registry 返回 null invoker → 消费线程回发 404 错误响应
         when(registry.find(anyInt())).thenReturn(null);
 
         GameMessage msg = GameMessage.newBuilder().setMsgId(1001).setSeq(1).build();
         session.enqueue(msg);
 
-        // Wait for consumer thread to process
+        // 等待消费线程处理
         Thread.sleep(200);
 
-        // Verify the consumer processed the message (sent error response since no invoker)
         verify(channel, atLeastOnce()).writeAndFlush(any(GameMessage.class));
     }
-
-    // ─── 14.4: enqueue when acceptingMessages=false → silently dropped ──────────
 
     @Test
     @DisplayName("enqueue when acceptingMessages=false → message silently dropped")
@@ -78,85 +73,70 @@ class GameSessionTest {
 
         Thread.sleep(100);
 
-        // No message should be processed (no writeAndFlush for this message)
-        // The consumer thread is still running but queue should be empty
+        // 消费线程仍在运行，但队列为空，不应有任何消息被处理
         verify(channel, never()).writeAndFlush(any(GameMessage.class));
     }
-
-    // ─── 14.4: enqueue when queue full → dropped, WARN logged, metrics updated ──
 
     @Test
     @DisplayName("enqueue when queue full → message dropped, serverMetrics.messageDropped() called")
     void enqueue_queueFull_messageDropped() throws Exception {
-        // Stop accepting first, then fill queue, then re-enable to test offer failure
-        // Actually, let's just fill the queue (capacity 256)
-        // We need to prevent the consumer from draining the queue
-        // Use a registry that blocks on find() to slow down consumption
-        session.close(); // close the default session
+        // 用一个在 find() 上阻塞的 registry 拖住消费线程，才能把队列填满
+        session.close();
 
-        // Create a session with a registry that blocks
         MsgControllerRegistry blockingRegistry = mock(MsgControllerRegistry.class);
-        // Make find() block to prevent consumption
         when(blockingRegistry.find(anyInt())).thenAnswer(invocation -> {
-            Thread.sleep(10_000); // block for a long time
+            Thread.sleep(10_000); // 长时间阻塞
             return null;
         });
 
         session = new GameSession(channel, blockingRegistry, 1000.0, serverMetrics);
 
-        // Enqueue one message to block the consumer
+        // 先入队一条消息把消费线程卡住
         session.enqueue(GameMessage.newBuilder().setMsgId(1).setSeq(0).build());
-        Thread.sleep(50); // let consumer pick it up and block
+        Thread.sleep(50); // 等消费线程取走并阻塞
 
-        // Now fill the queue (capacity 256)
+        // 填满队列（容量 256）
         for (int i = 0; i < 256; i++) {
             session.enqueue(GameMessage.newBuilder().setMsgId(1001).setSeq(i + 1).build());
         }
 
-        // Next enqueue should be dropped
+        // 再入队的消息应被丢弃
         long droppedBefore = serverMetrics.getMessagesDropped();
         session.enqueue(GameMessage.newBuilder().setMsgId(1001).setSeq(999).build());
 
         assertEquals(droppedBefore + 1, serverMetrics.getMessagesDropped());
     }
 
-    // ─── 14.4: POISON_PILL causes consumer thread to exit ───────────────────────
-
     @Test
     @DisplayName("close() stops accepting and sends POISON_PILL, consumer thread exits")
     void close_stopsConsumerThread() throws Exception {
         session.close();
 
-        // Give the consumer thread time to exit
+        // 留出时间让消费线程退出
         Thread.sleep(200);
 
-        // After close, enqueue should be silently dropped
+        // close 之后入队应被静默丢弃
         GameMessage msg = GameMessage.newBuilder().setMsgId(1001).setSeq(1).build();
         session.enqueue(msg);
 
         Thread.sleep(100);
-        // No processing should happen
         verify(channel, never()).writeAndFlush(any(GameMessage.class));
 
-        session = null; // prevent double-close in tearDown
+        session = null; // 避免 tearDown 中重复 close
     }
-
-    // ─── 14.4: awaitConsumerTermination exits cleanly ───────────────────────────
 
     @Test
     @DisplayName("awaitConsumerTermination sends POISON_PILL and waits for thread exit")
     void awaitConsumerTermination_exitsCleanly() {
         session.awaitConsumerTermination(5, TimeUnit.SECONDS);
 
-        // After termination, the session should no longer process messages
+        // 消费线程终止后不再处理任何消息
         session.enqueue(GameMessage.newBuilder().setMsgId(1001).setSeq(1).build());
 
-        // Give a moment
         try { Thread.sleep(100); } catch (InterruptedException ignored) {}
 
-        // No processing
         verify(channel, never()).writeAndFlush(any(GameMessage.class));
 
-        session = null; // consumer already terminated, close in tearDown would still work
+        session = null; // 消费线程已终止
     }
 }

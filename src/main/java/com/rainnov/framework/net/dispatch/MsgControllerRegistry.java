@@ -1,6 +1,5 @@
 package com.rainnov.framework.net.dispatch;
 
-import com.rainnov.framework.net.queue.GroupType;
 import com.rainnov.framework.net.session.GameSession;
 
 import com.google.protobuf.Message;
@@ -43,24 +42,24 @@ public class MsgControllerRegistry implements ApplicationContextAware, Initializ
                 int msgId = mapping.value();
                 Parameter[] params = method.getParameters();
 
-                // 6.3: 方法签名校验 — 第一个参数必须是 GameSession
+                // 方法签名校验 — 第一个参数必须是 GameSession
                 if (params.length != 2 || !GameSession.class.isAssignableFrom(params[0].getType())) {
                     throw new IllegalStateException(
                             method + " 的第一个参数必须是 GameSession");
                 }
 
-                // 6.3: 方法签名校验 — 第二个参数必须是 Message 子类
+                // 方法签名校验 — 第二个参数必须是 Message 子类
                 if (!Message.class.isAssignableFrom(params[1].getType())) {
                     throw new IllegalStateException(
                             method + " 的第二个参数必须是 com.google.protobuf.Message 的子类");
                 }
 
-                // 6.4: msgId 重复检测
+                // msgId 重复检测
                 if (invokerMap.containsKey(msgId)) {
                     throw new IllegalStateException("msgId=" + msgId + " 存在重复注册");
                 }
 
-                // 6.5: @MsgMapping value 与参数类名前缀 C{msgId}_ 一致性校验
+                // @MsgMapping value 与参数类名前缀 C{msgId}_ 一致性校验
                 String paramClassName = params[1].getType().getSimpleName();
                 if (paramClassName.matches("C\\d+_.*")) {
                     int inferredMsgId = Integer.parseInt(
@@ -74,7 +73,7 @@ public class MsgControllerRegistry implements ApplicationContextAware, Initializ
 
                 @SuppressWarnings("unchecked")
                 Class<? extends Message> payloadType = (Class<? extends Message>) params[1].getType();
-                invokerMap.put(msgId, new MethodInvoker(bean, method, payloadType, mapping.groupBy(), mapping.requireAuth()));
+                invokerMap.put(msgId, new MethodInvoker(bean, method, payloadType, mapping.requireAuth()));
                 log.info("注册 MsgMapping: msgId={} -> {}.{}()",
                         msgId, bean.getClass().getSimpleName(), method.getName());
             }
@@ -88,7 +87,6 @@ public class MsgControllerRegistry implements ApplicationContextAware, Initializ
             Object bean,
             Method method,
             Class<? extends Message> payloadType,
-            GroupType groupType,
             boolean requireAuth
     ) {}
 

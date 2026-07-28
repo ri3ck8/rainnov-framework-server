@@ -1,7 +1,6 @@
 package com.rainnov.framework.net.server;
 
 import com.rainnov.framework.net.dispatch.MsgControllerRegistry;
-import com.rainnov.framework.net.queue.*;
 import com.rainnov.framework.net.session.GameSession;
 import com.rainnov.framework.net.session.SessionManager;
 import com.rainnov.framework.proto.GameMessageProto.GameMessage;
@@ -16,24 +15,20 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.lang.reflect.Field;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 /**
  * MessageDispatcher 单元测试：
- * 验证路由逻辑、未认证拦截、停机状态、限流丢弃、groupType 路由。
+ * 验证路由逻辑、未认证拦截、停机状态、限流丢弃。
  */
 @ExtendWith(MockitoExtension.class)
 class MessageDispatcherTest {
 
     @Mock private SessionManager sessionManager;
     @Mock private MsgControllerRegistry msgControllerRegistry;
-    @Mock private SharedQueueManager sharedQueueManager;
     @Mock private ServerMetrics serverMetrics;
-    @Mock private GroupKeyResolver groupKeyResolver;
     @Mock private ChannelHandlerContext ctx;
     @Mock private Channel channel;
     @Mock private ChannelFuture channelFuture;
@@ -42,11 +37,7 @@ class MessageDispatcherTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        dispatcher = new MessageDispatcher(sessionManager, msgControllerRegistry, sharedQueueManager, serverMetrics);
-        // Inject groupKeyResolver via reflection (it's @Autowired(required=false))
-        Field resolverField = MessageDispatcher.class.getDeclaredField("groupKeyResolver");
-        resolverField.setAccessible(true);
-        resolverField.set(dispatcher, groupKeyResolver);
+        dispatcher = new MessageDispatcher(sessionManager, msgControllerRegistry, serverMetrics);
 
         lenient().when(ctx.channel()).thenReturn(channel);
         lenient().when(channel.writeAndFlush(any())).thenReturn(channelFuture);
@@ -64,8 +55,6 @@ class MessageDispatcherTest {
         return GameMessage.newBuilder().setMsgId(msgId).setSeq(1).build();
     }
 
-    // ─── 14.2: 未认证 + requireAuth=true → error_code=401 ──────────────────────
-
     @Test
     @DisplayName("Unauthenticated session + requireAuth=true → sends error_code=401")
     void unauthenticatedWithRequireAuth_sendsError401() throws Exception {
@@ -81,11 +70,8 @@ class MessageDispatcherTest {
         ArgumentCaptor<GameMessage> captor = ArgumentCaptor.forClass(GameMessage.class);
         verify(session).send(captor.capture());
         assertEquals(401, captor.getValue().getErrorCode());
-        // Should NOT enqueue
         verify(session, never()).enqueue(any());
     }
-
-    // ─── 14.2: 未认证 + unknown msgId → error_code=401 ─────────────────────────
 
     @Test
     @DisplayName("Unauthenticated session + unknown msgId → sends error_code=401")
@@ -101,17 +87,14 @@ class MessageDispatcherTest {
         assertEquals(401, captor.getValue().getErrorCode());
     }
 
-    // ─── 14.2: 已认证 + USER groupType → enqueue to session ────────────────────
-
     @Test
-    @DisplayName("Authenticated session + USER groupType → enqueue to session")
-    void authenticatedUserGroupType_enqueuesToSession() throws Exception {
+    @DisplayName("Authenticated session → enqueue to user queue")
+    void authenticatedSession_enqueuesToSession() throws Exception {
         GameSession session = createMockSession(true);
         when(sessionManager.getByChannel(channel)).thenReturn(session);
 
         MsgControllerRegistry.MethodInvoker invoker = mock(MsgControllerRegistry.MethodInvoker.class);
         when(invoker.requireAuth()).thenReturn(true);
-        when(invoker.groupType()).thenReturn(GroupType.USER);
         when(msgControllerRegistry.find(1001)).thenReturn(invoker);
 
         GameMessage msg = buildMsg(1001);
@@ -119,32 +102,6 @@ class MessageDispatcherTest {
 
         verify(session).enqueue(msg);
     }
-
-    // ─── 14.2: 已认证 + TEAM groupType + valid groupKey → SharedQueue ──────────
-
-    @Test
-    @DisplayName("Authenticated session + TEAM groupType + valid groupKey → enqueue to SharedQueue")
-    void authenticatedTeamGroupType_enqueuesToSharedQueue() throws Exception {
-        GameSession session = createMockSession(true);
-        when(sessionManager.getByChannel(channel)).thenReturn(session);
-
-        MsgControllerRegistry.MethodInvoker invoker = mock(MsgControllerRegistry.MethodInvoker.class);
-        when(invoker.requireAuth()).thenReturn(true);
-        when(invoker.groupType()).thenReturn(GroupType.TEAM);
-        when(msgControllerRegistry.find(2001)).thenReturn(invoker);
-
-        when(groupKeyResolver.resolve(session, GroupType.TEAM)).thenReturn("team:123");
-        SharedQueueManager.SharedQueue sharedQueue = mock(SharedQueueManager.SharedQueue.class);
-        when(sharedQueueManager.getOrCreate("team:123")).thenReturn(sharedQueue);
-
-        GameMessage msg = buildMsg(2001);
-        dispatcher.channelRead0(ctx, msg);
-
-        verify(sharedQueue).enqueue(any(GroupMessage.class));
-        verify(session, never()).enqueue(any());
-    }
-
-    // ─── 14.2: shuttingDown=true → message not enqueued ─────────────────────────
 
     @Test
     @DisplayName("shuttingDown=true → message not enqueued")
@@ -159,8 +116,6 @@ class MessageDispatcherTest {
         verify(session, never()).enqueue(any());
         verify(session, never()).send(any());
     }
-
-    // ─── 14.2: rate limit exceeded → message dropped ────────────────────────────
 
     @Test
     @DisplayName("Rate limit exceeded → message dropped, serverMetrics.messageDropped() called")

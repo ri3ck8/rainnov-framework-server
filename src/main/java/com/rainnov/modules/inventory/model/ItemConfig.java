@@ -10,5 +10,5 @@ public record ItemConfig(
     boolean usable,
     boolean discardable,
     Map<String, String> effectParams,
-    ExpirationPolicy expirationPolicy  // nullable, null means never expires
+    ExpirationPolicy expirationPolicy  // 可为 null，null 表示永不过期
 ) {}

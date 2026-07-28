@@ -1,6 +1,6 @@
 # Rainnov Framework Server
 
-基于 **Netty + Protobuf + Spring Boot 4.0 + Java 21** 的休闲游戏服务器框架。
+基于 **Netty + Protobuf + Spring Boot 4.1 + Java 25** 的休闲游戏服务器框架。
 
 通过消息号（Message ID）将网络消息路由到对应的业务处理器，支持注解驱动开发，业务开发者只需关注业务逻辑。
 
@@ -8,8 +8,8 @@
 
 - WebSocket + Protobuf 二进制协议，高性能异步非阻塞 I/O
 - `@MsgController` + `@MsgMapping` 注解自动注册消息处理器，类似 Spring MVC 的开发体验
-- 每用户独立消息队列 + Java 21 虚拟线程，天然保证单用户消息串行
-- 支持按队伍/公会维度的共享队列串行消费（单进程 & 跨进程 Redis 分布式队列）
+- 每用户独立消息队列 + Java 25 虚拟线程，天然保证单用户消息串行
+- 跨用户共享状态（队伍、公会等）由业务侧用锁或分布式锁显式控制，框架不做隐式串行
 - Guava 令牌桶限流、心跳检测、最大连接数限制
 - 优雅停机：停止入队 → 等待队列消费完毕 → 关闭连接
 - `MsgId.java` 由 Gradle 任务从 `.proto` 文件自动生成，零手动维护
@@ -23,7 +23,6 @@ src/main/java/com/rainnov/
 │   ├── net/
 │   │   ├── server/             # NettyServer, GameChannelInitializer, MessageDispatcher, ServerMetrics
 │   │   ├── session/            # GameSession, SessionManager
-│   │   ├── queue/              # SharedQueueManager, DistributedQueueManager, GroupMessage, GroupType, GroupKeyResolver, GameGroupKeyResolver
 │   │   └── dispatch/           # MsgController, MsgMapping, MsgControllerRegistry
 │   └── proto/                  # MsgId.java (自动生成)
 ├── modules/                    # 业务模块
@@ -34,6 +33,7 @@ src/main/java/com/rainnov/
 src/main/proto/
 ├── game_message.proto      # GameMessage 统一包装器 + 心跳消息
 ├── user.proto              # 登录/登出业务消息
+├── inventory.proto         # 背包模块消息
 └── msg-modules.properties  # 消息号模块范围映射配置
 ```
 
@@ -41,9 +41,8 @@ src/main/proto/
 
 ### 环境要求
 
-- JDK 21+
-- Gradle 9.x（项目自带 Gradle Wrapper）
-- Redis（仅使用分布式队列时需要）
+- JDK 25+
+- Gradle 9.5.1（项目自带 Gradle Wrapper）
 
 ### 1. 编译项目
 
@@ -59,19 +58,20 @@ src/main/proto/
 ./gradlew bootRun
 ```
 
-服务器默认监听 `ws://localhost:8888/ws`，可通过 `application.properties` 修改：
+服务器默认监听 `ws://localhost:8888/ws`，可通过 `src/main/resources/application.yml` 覆盖（均有代码默认值）：
 
-```properties
-game.server.port=8888
-game.server.max-connections=10000
-game.session.rate-limit=30.0
+```yaml
+game:
+  server:
+    port: 8888
+    max-connections: 10000
+    rate-limit:
+      per-second: 30
 ```
 
 ### 3. 运行测试客户端
 
-```bash
-./gradlew run -PmainClass=com.rainnov.client.GameClient
-```
+项目未引入 Gradle `application` 插件，直接从 IDE 运行 `com.rainnov.client.GameClient` 的 `main` 方法即可（需要命令行启动时，先在 `build.gradle` 中添加 `application` 插件或注册 `JavaExec` 任务）。
 
 客户端连接后自动每 30s 发送心跳，支持控制台命令：
 
@@ -124,21 +124,33 @@ public class RoomController {
 
 方法签名固定为 `(GameSession session, XxxReq req)`，返回值为 proto Message 时框架自动发送响应（响应号 = 请求号 + 1），返回 `void` 则由业务自行调用 `session.send()`。
 
-#### 4.3 队伍/公会串行消费
+#### 4.3 跨用户共享状态的并发控制
 
-对需要按组串行的消息，使用 `groupBy` 属性：
+框架只保证**单用户维度**串行：同一个 Session 的消息按到达顺序在专属虚拟线程上依次执行。队伍、公会、房间这类被多个用户同时改写的状态，由业务侧显式加锁，框架不提供隐式串行队列。
+
+单进程内用按 key 的锁：
 
 ```java
-// 同一 teamId 的消息在单进程内串行执行
-@MsgMapping(value = MsgId.GAME.TEAM_ACTION_REQ, groupBy = GroupType.TEAM)
-public void handleTeamAction(GameSession session, C3001_TeamActionReq req) { ... }
+private final ConcurrentHashMap<Long, ReentrantLock> teamLocks = new ConcurrentHashMap<>();
 
-// 跨进程串行（通过 Redis 分布式队列）
-@MsgMapping(value = MsgId.GAME.CROSS_SERVER_REQ, groupBy = GroupType.TEAM_DISTRIBUTED)
-public void handleCrossServer(GameSession session, C3002_CrossServerReq req) { ... }
+@MsgMapping(MsgId.GAME.TEAM_ACTION_REQ)
+public void handleTeamAction(GameSession session, C3001_TeamActionReq req) {
+    ReentrantLock lock = teamLocks.computeIfAbsent(req.getTeamId(), k -> new ReentrantLock());
+    lock.lock();
+    try {
+        // 临界区：读改写队伍状态
+    } finally {
+        lock.unlock();
+    }
+}
 ```
 
-需要实现 `GroupKeyResolver` 接口提供 groupKey 解析逻辑，参考 `GameGroupKeyResolver` 示例。
+多进程部署时改用分布式锁（Redis `SET NX PX` / Redisson / 数据库行锁等，按需引入依赖）。要点：
+
+- 锁粒度对齐业务实体（`team:{teamId}`），不要用全局锁
+- 必须设置过期时间，避免持锁进程崩溃后死锁
+- 临界区内只做状态读改写，不要放 I/O 或阻塞等待
+- 需要多把锁时固定加锁顺序，避免死锁
 
 ## 协议格式
 
@@ -162,6 +174,7 @@ message GameMessage {
 | 2000 ~ 2999 | 房间/匹配      |
 | 3000 ~ 3999 | 游戏逻辑       |
 | 4000 ~ 4999 | 社交           |
+| 5000 ~ 5999 | 背包           |
 | 30000+      | 管理/运维      |
 
 模块范围在 `src/main/proto/msg-modules.properties` 中配置。
@@ -171,6 +184,15 @@ message GameMessage {
 ```bash
 ./gradlew test
 ```
+
+## 更多文档
+
+详细设计、约定与开发指引见 [AGENTS.md](AGENTS.md) 索引与 `docs/` 目录：
+
+- [docs/architecture.md](docs/architecture.md) — 框架架构与消息分发
+- [docs/protocol.md](docs/protocol.md) — 协议与 msgId 生成机制
+- [docs/conventions.md](docs/conventions.md) — 命名与编码约定
+- [docs/guides/new-module.md](docs/guides/new-module.md) — 新业务模块脚手架
 
 ## License
 
